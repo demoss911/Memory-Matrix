@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Memory Matrix - Daily Challenge</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --grid-bg: #1e1e1e;
+            --tile-idle: #2a2a2a;
+            --tile-active: #4CAF50; /* Green */
+            --tile-wrong: #f44336; /* Red */
+            --text-main: #ffffff;
+            --text-muted: #aaaaaa;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            touch-action: manipulation;
+            user-select: none;
+        }
+
+        #header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        #title {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            letter-spacing: 1px;
+        }
+
+        #stats {
+            font-size: 18px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        /* The CSS Grid is perfect for this */
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            background-color: var(--grid-bg);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 30px;
+        }
+
+        .tile {
+            width: 70px;
+            height: 70px;
+            background-color: var(--tile-idle);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+
+        /* Responsive sizing for smaller phones */
+        @media (max-width: 400px) {
+            .tile { width: 60px; height: 60px; }
+        }
+
+        .tile:active { transform: scale(0.95); }
+        .tile.active { background-color: var(--tile-active); }
+        .tile.wrong { background-color: var(--tile-wrong); }
+        .tile.disabled { pointer-events: none; }
+
+        #message {
+            font-size: 18px;
+            height: 24px;
+            font-weight: bold;
+            color: #FFD700;
+        }
+
+        /* Modal Overlays */
+        #overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .hidden { display: none !important; }
+
+        .btn {
+            background-color: var(--tile-active);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+        }
+
+        #share-btn {
+            background-color: #1DA1F2; /* Twitter Blue */
+            box-shadow: 0 4px 15px rgba(29, 161, 242, 0.4);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div id="title">🧠 Memory Matrix</div>
+        <div id="stats">
+            <span id="level-display">Level: 1</span>
+            <span id="lives-display">Lives: ❤️❤️❤️</span>
+        </div>
+    </div>
+
+    <div id="grid">
+        </div>
+
+    <div id="message">Tap "Start" when ready</div>
+
+    <div id="start-overlay" id="overlay" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:20;">
+        <h1 style="color:white; margin-bottom:10px;">Daily Challenge</h1>
+        <p style="color:#aaa; text-align:center; max-width:300px;">Memorize the green tiles.<br>Recall them before you lose 3 lives.<br>Everyone plays the same puzzle today.</p>
+        <button class="btn" onclick="startGame()">Start Game</button>
+    </div>
+
+    <div id="game-over-overlay" class="hidden" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:20;">
+        <h1 style="color:white; margin-bottom:5px;">Out of Lives!</h1>
+        <h2 style="color:#FFD700; margin-bottom:20px;" id="final-score">You reached Level X</h2>
+        <button id="share-btn" class="btn" onclick="shareScore()">Share Result 📋</button>
+        <p id="share-confirm" style="color:#4CAF50; margin-top:15px; font-weight:bold; height:20px;"></p>
+    </div>
+
+<script>
+    // --- AUDIO SYSTEM ---
+    let audioCtx;
+    function initAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+    function playTone(freq, type, duration, vol) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.type = type; osc.frequency.value = freq;
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // --- SEED GENERATOR (Daily Puzzle Logic) ---
+    // This ensures random numbers are the exact same for everyone on the same day
+    function getDailySeed() {
+        const d = new Date();
+        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    }
+    
+    // Simple seeded random function (Mulberry32)
+    function seededRandom(str) {
+        let h = 1779033703 ^ str.length;
+        for(let i = 0; i < str.length; i++) {
+            h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+            h = h << 13 | h >>> 19;
+        }
+        return function() {
+            h = Math.imul(h ^ h >>> 16, 2246822507);
+            h = Math.imul(h ^ h >>> 13, 3266489909);
+            return (h ^= h >>> 16) >>> 0;
+        }
+    }
+    
+    const dailySeedString = getDailySeed();
+    let prng = seededRandom(dailySeedString);
+
+    // --- GAME STATE ---
+    const gridEl = document.getElementById('grid');
+    const levelDisplay = document.getElementById('level-display');
+    const livesDisplay = document.getElementById('lives-display');
+    const msgDisplay = document.getElementById('message');
+    
+    let level = 1;
+    let lives = 3;
+    let activeTiles = []; // The correct sequence
+    let clickedTiles = []; // What the player has clicked
+    let isInputLocked = true;
+    let finalGridState = []; // For the emoji output
+
+    // Create 4x4 Grid
+    for (let i = 0; i < 16; i++) {
+        const tile = document.createElement('div');
+        tile.classList.add('tile');
+        tile.dataset.index = i;
+        tile.addEventListener('click', () => handleTileClick(i, tile));
+        gridEl.appendChild(tile);
+    }
+    const tiles = document.querySelectorAll('.tile');
+
+    function startGame() {
+        initAudio();
+        document.getElementById('start-overlay').classList.add('hidden');
+        startLevel();
+    }
+
+    function startLevel() {
+        isInputLocked = true;
+        clickedTiles = [];
+        tiles.forEach(t => {
+            t.className = 'tile'; // Reset classes
+        });
+        
+        levelDisplay.innerText = `Level: ${level}`;
+        msgDisplay.innerText = "Memorize...";
+
+        // Logic for difficulty: Number of tiles to remember increases with level
+        // Starts at 3 tiles, caps at 9 tiles
+        const numTilesToRemember = Math.min(3 + Math.floor((level - 1) / 2), 9);
+        
+        // Pick random tiles using our daily seed generator
+        // Note: We re-seed based on the level so it's consistent every day
+        let levelPrng = seededRandom(dailySeedString + "-level-" + level);
+        activeTiles = [];
+        let availableTiles = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+        
+        for(let i=0; i<numTilesToRemember; i++) {
+            let randIndex = levelPrng() % availableTiles.length;
+            activeTiles.push(availableTiles[randIndex]);
+            availableTiles.splice(randIndex, 1);
+        }
+
+        // Show pattern
+        setTimeout(() => {
+            activeTiles.forEach(idx => tiles[idx].classList.add('active'));
+            playTone(800, 'sine', 0.2, 0.3);
+            
+            // Hide pattern after 1.5 seconds (gets slightly faster at higher levels)
+            const showTime = Math.max(1500 - (level * 50), 600);
+            
+            setTimeout(() => {
+                tiles.forEach(t => t.classList.remove('active'));
+                msgDisplay.innerText = "Your Turn!";
+                isInputLocked = false;
+            }, showTime);
+
+        }, 500);
+    }
+
+    function handleTileClick(index, tileEl) {
+        if (isInputLocked) return;
+
+        // Ignore already correctly clicked tiles
+        if (clickedTiles.includes(index) && activeTiles.includes(index)) return;
+
+        if (activeTiles.includes(index)) {
+            // Correct click
+            playTone(600, 'sine', 0.1, 0.5);
+            tileEl.classList.add('active');
+            clickedTiles.push(index);
+
+            // Check if level complete
+            if (clickedTiles.length === activeTiles.length) {
+                isInputLocked = true;
+                msgDisplay.innerText = "Perfect!";
+                playTone(1000, 'sine', 0.3, 0.4);
+                level++;
+                setTimeout(startLevel, 1000);
+            }
+        } else {
+            // Wrong click
+            playTone(150, 'sawtooth', 0.3, 0.5);
+            tileEl.classList.add('wrong');
+            lives--;
+            updateLivesDisplay();
+            
+            if (lives <= 0) {
+                isInputLocked = true;
+                msgDisplay.innerText = "Game Over!";
+                saveFinalGridState(index);
+                setTimeout(showGameOver, 1000);
+            }
+        }
+    }
+
+    function updateLivesDisplay() {
+        let hearts = "";
+        for(let i=0; i<lives; i++) hearts += "❤️";
+        for(let i=lives; i<3; i++) hearts += "🖤";
+        livesDisplay.innerText = `Lives: ${hearts}`;
+    }
+
+    // --- VIRAL SHARE ENGINE ---
+    // Captures the board state when they die
+    function saveFinalGridState(fatalIndex) {
+        finalGridState = [];
+        for (let i = 0; i < 16; i++) {
+            if (i === fatalIndex) {
+                finalGridState.push("🟥"); // The mistake
+            } else if (activeTiles.includes(i)) {
+                if (clickedTiles.includes(i)) {
+                    finalGridState.push("🟩"); // Found correctly
+                } else {
+                    finalGridState.push("⬜"); // Missed it
+                }
+            } else {
+                finalGridState.push("⬛"); // Blank background
+            }
+        }
+    }
+
+    function showGameOver() {
+        document.getElementById('game-over-overlay').classList.remove('hidden');
+        document.getElementById('final-score').innerText = `You reached Level ${level}`;
+    }
+
+    function shareScore() {
+        const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        
+        // Format the emoji grid into 4 rows of 4
+        let gridText = "";
+        for(let i=0; i<16; i++) {
+            gridText += finalGridState[i];
+            if ((i + 1) % 4 === 0) gridText += "\n";
+        }
+
+        const shareText = `🧠 Memory Matrix - Daily Challenge\n📅 ${dateStr}\n📈 Reached Level: ${level}\n\n${gridText}\nPlay here: https://[YOUR-GITHUB-USERNAME].github.io/Memory-Matrix`;
+
+        // Use modern Clipboard API
+        navigator.clipboard.writeText(shareText).then(() => {
+            document.getElementById('share-confirm').innerText = "Copied to Clipboard!";
+        }).catch(err => {
+            // Fallback for older mobile browsers
+            console.error('Failed to copy', err);
+            document.getElementById('share-confirm').innerText = "Hold down and copy this:\n\n" + shareText;
+        });
+    }
+
+</script>
+</body>
+</html>
